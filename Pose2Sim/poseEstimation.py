@@ -43,7 +43,6 @@ import queue
 import multiprocessing
 import psutil
 
-
 import numpy as np
 import itertools as it
 
@@ -119,7 +118,9 @@ def rtm_estimator(config_dict):
         video_files = sorted([str(f) for f in Path(source_dir).rglob('*' + vid_img_extension) if f.is_file()])
         sources.extend({'type': 'video', 'id': idx, 'path': video_path} for idx, video_path in enumerate(video_files))
         image_dirs = sorted([str(f) for f in Path(source_dir).iterdir() if f.is_dir()])
-        sources.extend({'type': 'images', 'id': idx, 'path': folder} for idx, folder in enumerate(image_dirs, start=len(video_files)))
+        for idx, folder in enumerate(image_dirs, start=len(video_files)):
+            image_files = sorted(Path(folder).iterdir(), key=natural_sort_key)
+            sources.extend({'type': 'images', 'id': idx, 'path': file} for file in image_files)
 
     if not sources:
         raise FileNotFoundError(f'No Webcams or no media files found in {source_dir}.')
@@ -719,6 +720,47 @@ def setup_capture_directories(source_path, output_dir, save_images):
 
     return output_dir, output_dir_name, img_output_dir, json_output_dir, output_video_path
 
+
+def save_to_openpose(json_file_path, keypoints, scores):
+    '''
+    Save the keypoints and scores to a JSON file in the OpenPose format
+
+    INPUTS:
+    - json_file_path: Path to save the JSON file
+    - keypoints: Detected keypoints
+    - scores: Confidence scores for each keypoint
+
+    OUTPUTS:
+    - JSON file with the detected keypoints and confidence scores in the OpenPose format
+    '''
+
+    # Prepare keypoints with confidence scores for JSON output
+    keypoints_with_confidence = np.concatenate([keypoints, scores[:, :, np.newaxis]], axis=2)
+    keypoints_with_confidence_flat = keypoints_with_confidence.reshape((keypoints.shape[0], -1))
+
+    detections = [
+        {
+            "person_id": [-1],
+            "pose_keypoints_2d": person_keypoints.tolist(),
+            "face_keypoints_2d": [],
+            "hand_left_keypoints_2d": [],
+            "hand_right_keypoints_2d": [],
+            "pose_keypoints_3d": [],
+            "face_keypoints_3d": [],
+            "hand_left_keypoints_3d": [],
+            "hand_right_keypoints_3d": []
+        }
+        for person_keypoints in keypoints_with_confidence_flat
+    ]
+
+    # Create JSON output structure
+    json_output = {"version": 1.3, "people": detections}
+
+    # Save JSON output for each frame
+    with open(json_file_path, 'w') as json_file:
+        json.dump(json_output, json_file)
+
+
 def setup_backend_device(backend='auto', device='auto'):
     '''
     Set up the backend and device for the pose tracker based on the availability of hardware acceleration.
@@ -774,45 +816,11 @@ def determine_tracker_settings(config_dict):
     mode = config_dict['pose']['mode']
     pose_model = config_dict['pose']['pose_model']
 
-    try:
-        import torch
-        import onnxruntime as ort
-        if torch.cuda.is_available() and 'CUDAExecutionProvider' in ort.get_available_providers():
-            device = 'cuda'
-            backend = 'onnxruntime'
-            logging.info(f"Valid CUDA installation found: using ONNXRuntime backend with GPU.")
-        elif torch.cuda.is_available() and 'ROCMExecutionProvider' in ort.get_available_providers():
-            device = 'rocm'
-            backend = 'onnxruntime'
-            logging.info(f"Valid ROCM installation found: using ONNXRuntime backend with GPU.")
-        else:
-            raise
-    except:
-        try:
-            import onnxruntime as ort
-            if 'MPSExecutionProvider' in ort.get_available_providers() or 'CoreMLExecutionProvider' in ort.get_available_providers():
-                device = 'mps'
-                backend = 'onnxruntime'
-                logging.info(f"Valid MPS installation found: using ONNXRuntime backend with GPU.")
-            else:
-                raise
-        except:
-            device = 'cpu'
-            backend = 'openvino'
-            logging.info(f"No valid CUDA installation found: using OpenVINO backend with CPU.")
-
-        logging.info(f"Using device: {device}, backend: {backend}")
-
-    if det_frequency > 1:
-        logging.info(f'Inference run every {det_frequency} frames. In between, pose estimation tracks previously detected points.')
-    elif det_frequency == 1:
-        logging.info(f'Inference run on every single frame.')
-    else:
-        raise ValueError(f"Invalid det_frequency: {det_frequency}. Must be an integer greater or equal to 1.")
+    backend, device = setup_backend_device(backend=backend, device=device)
 
     # Select the appropriate model based on the model_type
     if pose_model.upper() in ('HALPE_26', 'BODY_WITH_FEET'):
-        model_class = BodyWithFeet
+        model_class = BodyWithFeet # 26 keypoints(halpe26)
         logging.info(f"Using HALPE_26 model (body and feet) for pose estimation.")
     elif pose_model.upper() in ('COCO_133', 'WHOLE_BODY'):
         model_class = Wholebody
