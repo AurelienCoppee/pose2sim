@@ -124,7 +124,7 @@ class TestWorkflow(unittest.TestCase):
         os.chdir(project_dir)
         config_dict.get("project").update({"project_dir":project_dir})
         config_dict.get("pose").update({"mode":'lightweight'})
-        config_dict.get("pose").update({"display_detection":False})
+        config_dict.get("pose").update({"show_realtime_results":False})
         config_dict.get("pose").update({"backend":'openvino'})
         config_dict.get("pose").update({"device":'cpu'})
         config_dict.get("synchronization").update({"display_sync_plots":False})
@@ -156,7 +156,7 @@ class TestWorkflow(unittest.TestCase):
         os.chdir(project_dir)
         config_dict.get("project").update({"project_dir":project_dir})
         config_dict.get("pose").update({"mode":'lightweight'})
-        config_dict.get("pose").update({"display_detection":False})
+        config_dict.get("pose").update({"show_realtime_results":False})
         config_dict.get("synchronization").update({"display_sync_plots":False})
         config_dict['filtering']['display_figures'] = False
 
